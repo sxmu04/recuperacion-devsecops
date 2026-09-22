@@ -1,0 +1,95 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+
+  seguridad:
+    name: Seguridad
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Analizar dependencias con npm audit
+        run: npm audit --audit-level=high
+
+      - name: Construir imagen Docker
+        run: docker build -t api-recuperacion:${{ github.sha }} .
+
+      - name: Analizar imagen con Trivy
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest \
+            image \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            api-recuperacion:${{ github.sha }}
+
+  deploy:
+    name: Deploy EC2
+
+    needs:
+      - seguridad
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Configurar SSH
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ec2_key
+
+          chmod 600 ~/.ssh/ec2_key
+
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Desplegar en EC2
+        shell: bash
+        run: |
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            '
+              set -e
+
+              cd /opt/recuperacion-devsecops
+
+              git fetch origin main
+
+              git reset --hard origin/main
+
+              docker compose config
+
+              docker compose up -d --build --remove-orphans
+
+              docker compose ps
+            '
