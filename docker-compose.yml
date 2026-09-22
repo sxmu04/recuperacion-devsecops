@@ -1,0 +1,60 @@
+services:
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-recuperacion
+    restart: "no"
+    expose:
+      - "8080"
+    networks:
+      - recuperacion-net
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    restart: unless-stopped
+    expose:
+      - "3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    networks:
+      - recuperacion-net
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - recuperacion-net
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    environment:
+      TZ: America/Bogota
+      DISABLE_IPV6: "true"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - recuperacion-net
+
+networks:
+  recuperacion-net:
+    driver: bridge
+
+volumes:
+  uptime-kuma-data:
+  npm-data:
+  npm-letsencrypt:
